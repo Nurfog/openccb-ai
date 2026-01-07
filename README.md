@@ -165,4 +165,4 @@ openccb-ai/
 
 ## 📄 Licencia
 
-Este proyecto es privado y confidencial.
+Este proyecto está bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.
