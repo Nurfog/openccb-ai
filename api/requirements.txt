@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+requests
+redis
+passlib[bcrypt]
+uuid
+sqlalchemy
+psycopg2-binary
