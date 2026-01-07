@@ -122,6 +122,7 @@ curl -X POST "http://localhost:8000/login" \
 
 *   **Nueva Sesión:** Omite `session_id`. La API creará uno nuevo y generará un título automático.
 *   **Continuar Sesión:** Envía el `session_id` devuelto anteriormente.
+*   **RAG (Base de Conocimiento):** Envía `"use_kb": true` para que la IA busque en los documentos de S3.
 
 ```bash
 curl -X POST "http://localhost:8000/chat" \
@@ -129,7 +130,8 @@ curl -X POST "http://localhost:8000/chat" \
      -d '{
            "username": "juan",
            "prompt": "Explícame qué es Docker en una frase",
-           "session_id": "OPCIONAL_UUID_AQUI"
+           "session_id": "OPCIONAL_UUID_AQUI",
+           "use_kb": true
          }'
 ```
 *Respuesta:* Stream de texto plano. Al final incluye un JSON con el ID de sesión: `{"session_id": "..."}`.
@@ -157,24 +159,16 @@ curl -X POST "http://localhost:8000/analyze?model=llama3&query=Donde%20esta%20el
 ```
 *Respuesta:* JSON con los temas principales extraídos del documento.
 
----
+### 6. Sincronizar Base de Conocimiento (S3)
+**POST** `/s3/sync`
+Descarga los PDFs del bucket S3 configurado, extrae el texto página por página e indexa el contenido en la base de datos para búsquedas RAG.
 
-## 📂 Estructura del Proyecto
-
-```text
-openccb-ai/
-├── api/                 # Código fuente del Backend (FastAPI)
-│   ├── main.py          # Lógica principal y endpoints
-│   ├── Dockerfile       # Definición del contenedor de la API
-│   └── requirements.txt # Dependencias de Python
-├── frontend/            # Interfaz de usuario (Streamlit)
-├── docker-compose.yml   # Orquestación de servicios (CPU base)
-├── docker-compose.gpu.yml # Configuración adicional para NVIDIA GPU
-├── setup.sh             # Script de instalación automática en servidor
-├── ssh_deploy.sh        # Script de despliegue remoto (Push)
-├── deploy.sh            # Script de despliegue vía FTP (Pull)
-└── .env.example         # Plantilla de variables de entorno
+```bash
+curl -X POST "http://localhost:8000/s3/sync"
 ```
+*Respuesta:* JSON con la cantidad de páginas sincronizadas.
+
+---
 
 ## 📄 Licencia
 
