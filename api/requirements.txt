@@ -3,6 +3,9 @@ uvicorn
 requests
 redis
 passlib[bcrypt]
+bcrypt==3.2.2
 uuid
 sqlalchemy
 psycopg2-binary
+pypdf
+python-multipart

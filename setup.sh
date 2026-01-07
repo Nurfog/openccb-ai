@@ -23,7 +23,7 @@ fi
 # 2. Instalar dependencias básicas y Docker
 echo -e "${GREEN}>>> Actualizando sistema e instalando dependencias...${NC}"
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg lsb-release git openssl nginx
+sudo apt-get install -y ca-certificates curl gnupg lsb-release git openssl nginx lsof
 
 # Instalar Docker si no existe
 if ! command -v docker &> /dev/null; then
@@ -114,6 +114,20 @@ sudo nginx -t && sudo systemctl restart nginx
 
 # 6. Despliegue con Docker Compose
 echo -e "${GREEN}>>> Construyendo y levantando contenedores...${NC}"
+
+# Verificar conflicto en puerto 11434 (Ollama local vs Docker)
+if sudo lsof -i :11434 > /dev/null 2>&1; then
+    echo -e "${YELLOW}>>> Puerto 11434 ocupado. Verificando conflictos...${NC}"
+    if systemctl is-active --quiet ollama; then
+        echo -e "${GREEN}>>> Deteniendo servicio local de Ollama (systemd)...${NC}"
+        sudo systemctl stop ollama
+        sudo systemctl disable ollama
+    else
+        echo -e "${YELLOW}>>> Liberando puerto 11434 (kill process)...${NC}"
+        sudo kill -9 $(sudo lsof -t -i:11434)
+    fi
+fi
+
 sudo docker compose up -d --build
 
 echo -e "${GREEN}==============================================${NC}"

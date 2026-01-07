@@ -9,6 +9,9 @@
 *   **Memoria Contextual:** La IA recuerda lo que se habló anteriormente en la sesión gracias a Redis.
 *   **Multi-Usuario:** Sistema de autenticación y gestión de sesiones con PostgreSQL.
 *   **Soporte GPU:** Detección y configuración automática de tarjetas NVIDIA para máxima velocidad.
+*   **Interfaz Gráfica:** Frontend moderno construido con Streamlit para facilitar el uso.
+*   **Multi-Modelo:** Capacidad de cambiar dinámicamente entre modelos (Llama 3, Mistral, CodeLlama, etc.).
+*   **Análisis de Documentos:** Subida de PDFs para extracción automática de temas y puntos clave.
 *   **Despliegue Automatizado:** Scripts incluidos para instalación en servidores Ubuntu y actualizaciones remotas.
 
 ---
@@ -58,6 +61,7 @@ Si quieres ejecutarlo en tu máquina para programar:
     docker compose up --build
     ```
 3.  La API estará disponible en `http://localhost:8000`.
+4.  La Interfaz Web (Frontend) estará disponible en `http://localhost:8501`.
 
 ---
 
@@ -145,6 +149,15 @@ curl "http://localhost:8000/sessions/juan"
 ]
 ```
 
+### 5. Analizar Documento
+**POST** `/analyze`
+```bash
+curl -X POST "http://localhost:8000/analyze" \
+     -F "file=@documento.pdf" \
+     -F "model=llama3"
+```
+*Respuesta:* JSON con los temas principales extraídos del documento.
+
 ---
 
 ## 📂 Estructura del Proyecto
@@ -155,6 +168,7 @@ openccb-ai/
 │   ├── main.py          # Lógica principal y endpoints
 │   ├── Dockerfile       # Definición del contenedor de la API
 │   └── requirements.txt # Dependencias de Python
+├── frontend/            # Interfaz de usuario (Streamlit)
 ├── docker-compose.yml   # Orquestación de servicios (CPU base)
 ├── docker-compose.gpu.yml # Configuración adicional para NVIDIA GPU
 ├── setup.sh             # Script de instalación automática en servidor
@@ -165,4 +179,4 @@ openccb-ai/
 
 ## 📄 Licencia
 
-Este proyecto está bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.
+Este proyecto está bajo la Licencia MIT. Consulta el archivo LICENSE para más detalles.

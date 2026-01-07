@@ -13,22 +13,23 @@ Este documento describe el plan de desarrollo, los hitos alcanzados y las futura
 ## 🚧 Fase 2: Consolidación de Datos (En Progreso)
 *Objetivo: Migrar la persistencia temporal a una estructura relacional sólida para 60+ usuarios.*
 
-- [ ] **Migración de Auth a PostgreSQL:** Mover la gestión de usuarios de Redis a PostgreSQL (actualmente en Redis por simplicidad).
-- [ ] **Historial Persistente:** Guardar el log completo de los chats en base de datos para auditoría (no solo el contexto en memoria).
+- [x] **Migración de Auth a PostgreSQL:** Mover la gestión de usuarios de Redis a PostgreSQL.
+- [x] **Historial Persistente:** Guardar el log completo de los chats en base de datos para auditoría.
 - [ ] **Gestión de Roles:** Crear roles (Admin, Usuario) para limitar el acceso a ciertos modelos o configuraciones.
 - [ ] **Conectores de Datos:** Implementar funciones para que la IA pueda consultar bases de datos externas (SQL) y responder preguntas sobre stock o datos internos.
 
 ## 🎨 Fase 3: Experiencia de Usuario (Frontend)
 *Objetivo: Facilitar el uso de la herramienta para usuarios no técnicos.*
 
-- [ ] **Interfaz Web:** Desarrollar un frontend ligero (Streamlit o React) que consuma la API.
+- [x] **Interfaz Web:** Desarrollar un frontend ligero (Streamlit) que consuma la API.
+- [x] **Selector de Modelos:** Capacidad de cambiar entre Llama3, Mistral, CodeLlama, etc. desde la UI.
 - [ ] **Gestión de Sesiones Visual:** Panel lateral para ver, renombrar y eliminar conversaciones antiguas.
 - [ ] **Feedback:** Botones de "Me gusta" / "No me gusta" en las respuestas para evaluar la calidad del modelo.
 
 ## 🧠 Fase 4: Capacidades Avanzadas (RAG)
 *Objetivo: Que la IA "lea" documentos de la empresa.*
 
-- [ ] **Ingesta de Documentos:** Endpoint para subir PDFs, Excel o Word.
+- [x] **Ingesta de Documentos:** Endpoint para subir y analizar PDFs.
 - [ ] **Base de Datos Vectorial:** Integrar `pgvector` en PostgreSQL para búsquedas semánticas.
 - [ ] **Citas:** Que la IA indique en qué documento basó su respuesta.
 

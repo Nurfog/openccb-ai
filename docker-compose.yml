@@ -26,6 +26,7 @@ services:
 
   api:
     build: ./api
+    restart: always
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -39,6 +40,17 @@ services:
       - ollama
       - redis
       - db
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:8000
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - api
 
 volumes:
   ollama_data:
