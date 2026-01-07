@@ -15,7 +15,9 @@ from typing import List, Optional
 app = FastAPI()
 
 # Conexión a Redis para guardar el historial de conversaciones
-redis_client = redis.Redis(host='redis', port=6379, db=0)
+redis_host = os.getenv("REDIS_HOST", "redis")
+redis_port = int(os.getenv("REDIS_PORT", 6379))
+redis_client = redis.Redis(host=redis_host, port=redis_port, db=0)
 
 # Configuración para hashing de contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

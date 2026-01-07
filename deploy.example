@@ -1,0 +1,10 @@
+# Configuración del Servidor FTP
+FTP_HOST=ftp.ejemplo.com
+FTP_USER=usuario
+FTP_PASS=contraseña
+
+# Ruta del archivo en el servidor FTP (ej. openccb-ai.zip)
+FTP_FILE_PATH=backups/openccb-ai-latest.zip
+
+# Directorio local donde se desplegará el proyecto
+DEPLOY_DIR=./openccb-ai

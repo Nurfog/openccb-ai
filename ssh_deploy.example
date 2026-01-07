@@ -1,0 +1,10 @@
+# Configuración del Servidor Remoto
+REMOTE_USER=usuario
+REMOTE_HOST=192.168.1.100
+REMOTE_PORT=22
+
+# Ruta donde se instalará el proyecto en el servidor
+REMOTE_DIR=/home/usuario/openccb-ai
+
+# (Opcional) Ruta a tu llave privada SSH si no usas agente
+# SSH_KEY_PATH=/home/tu_usuario/.ssh/id_rsa
