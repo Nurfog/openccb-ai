@@ -25,6 +25,8 @@ if "session_id" not in st.session_state:
     st.session_state.session_id = None
 if "current_model" not in st.session_state:
     st.session_state.current_model = "llama3"
+if "use_kb" not in st.session_state:
+    st.session_state.use_kb = False
 
 def login_register_sidebar():
     with st.sidebar:
@@ -85,20 +87,36 @@ def login_register_sidebar():
             )
             
             st.divider()
+            st.subheader("☁️ Base de Conocimiento (S3)")
+            if st.button("Sincronizar Documentos"):
+                with st.spinner("Descargando e indexando desde S3..."):
+                    try:
+                        res = requests.post(f"{API_URL}/s3/sync")
+                        if res.status_code == 200:
+                            st.success(res.json().get("message"))
+                        else:
+                            st.error(f"Error: {res.text}")
+                    except Exception as e:
+                        st.error(f"Error de conexión: {e}")
+            
+            st.divider()
             st.subheader("📄 Analizar Documento")
             uploaded_file = st.file_uploader("Subir PDF para buscar temas", type="pdf")
+            doc_query = st.text_input("Pregunta sobre el documento (Opcional)", placeholder="Ej: ¿Dónde está el procedimiento de no conformidad?")
             
             if uploaded_file is not None:
-                if st.button("Extraer Temas"):
-                    with st.spinner("Leyendo documento y analizando..."):
+                if st.button("Analizar Documento"):
+                    with st.spinner("Procesando documento..."):
                         try:
                             files = {"file": (uploaded_file.name, uploaded_file, "application/pdf")}
                             params = {"model": st.session_state.current_model}
+                            if doc_query:
+                                params["query"] = doc_query
                             res = requests.post(f"{API_URL}/analyze", files=files, params=params)
                             
                             if res.status_code == 200:
                                 st.success("Análisis completado")
-                                st.info(res.json().get("topics"))
+                                st.info(res.json().get("result"))
                             else:
                                 st.error(f"Error: {res.text}")
                         except Exception as e:
@@ -119,6 +137,9 @@ def chat_interface():
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
+    # Checkbox para activar RAG
+    st.session_state.use_kb = st.checkbox("🔍 Buscar en Base de Conocimiento", value=st.session_state.use_kb)
+
     # Input de usuario
     if prompt := st.chat_input("Escribe tu mensaje..."):
         # Guardar y mostrar mensaje usuario
@@ -136,7 +157,8 @@ def chat_interface():
                     "username": st.session_state.username,
                     "prompt": prompt,
                     "session_id": st.session_state.session_id,
-                    "model": st.session_state.current_model
+                    "model": st.session_state.current_model,
+                    "use_kb": st.session_state.use_kb
                 }
                 
                 # Petición con streaming

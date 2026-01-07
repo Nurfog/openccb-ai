@@ -7,6 +7,7 @@ import requests
 import redis
 import uuid
 import io
+import boto3
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from passlib.context import CryptContext
 from typing import List, Optional
 from pypdf import PdfReader
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, Text, DateTime
+from sqlalchemy import or_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime
@@ -57,6 +59,15 @@ class ChatMessage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     session = relationship("ChatSession", back_populates="messages")
 
+class KnowledgePage(Base):
+    __tablename__ = "knowledge_pages"
+    id = Column(Integer, primary_key=True, index=True)
+    filename = Column(String, index=True)
+    s3_key = Column(String, index=True)
+    page_number = Column(Integer)
+    content = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # Crear tablas
 Base.metadata.create_all(bind=engine)
 
@@ -80,6 +91,7 @@ class ChatRequest(BaseModel):
     prompt: str
     model: str = "llama3"  # Asegúrate de tener este modelo descargado en Ollama
     session_id: Optional[str] = None # Identificador opcional
+    use_kb: bool = False # Usar base de conocimiento
 
 @app.get("/")
 def read_root():
@@ -121,6 +133,51 @@ def get_sessions(username: str, db: Session = Depends(get_db)):
         }
         for s in user.sessions
     ]
+
+@app.post("/s3/sync")
+def sync_s3(db: Session = Depends(get_db)):
+    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    aws_region = os.getenv("AWS_REGION")
+    bucket_name = os.getenv("S3_BUCKET_NAME")
+
+    if not all([aws_access_key, aws_secret_key, bucket_name]):
+        raise HTTPException(status_code=500, detail="Faltan credenciales de AWS en variables de entorno")
+
+    s3 = boto3.client('s3', aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=aws_region)
+    
+    try:
+        response = s3.list_objects_v2(Bucket=bucket_name)
+        if 'Contents' not in response:
+            return {"message": "Bucket vacío o sin acceso"}
+            
+        count = 0
+        for obj in response['Contents']:
+            key = obj['Key']
+            # Solo procesar PDFs por ahora
+            if not key.lower().endswith('.pdf'): continue
+            
+            # Verificar si ya existe alguna página de este documento para no procesarlo de nuevo
+            if db.query(KnowledgePage).filter(KnowledgePage.s3_key == key).first():
+                continue
+                
+            # Descargar y procesar
+            file_obj = io.BytesIO()
+            s3.download_fileobj(bucket_name, key, file_obj)
+            pdf = PdfReader(file_obj)
+            
+            # Procesar página por página
+            for i, page in enumerate(pdf.pages):
+                text = page.extract_text() or ""
+                if text.strip():
+                    doc = KnowledgePage(filename=key.split('/')[-1], s3_key=key, page_number=i+1, content=text)
+                    db.add(doc)
+                    count += 1
+        
+        db.commit()
+        return {"message": f"Sincronizadas {count} páginas nuevas desde S3"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error S3: {str(e)}")
 
 @app.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db)):
@@ -167,6 +224,20 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     if cached_context:
         context = json.loads(cached_context)
     
+    # Lógica RAG (Búsqueda simple por palabras clave en DB)
+    rag_context = ""
+    if request.use_kb:
+        # Buscamos documentos que contengan palabras clave del prompt (búsqueda ingenua pero funcional sin vectores)
+        keywords = [w for w in request.prompt.split() if len(w) > 4] # Palabras > 4 letras
+        if keywords:
+            filters = [KnowledgePage.content.ilike(f"%{kw}%") for kw in keywords]
+            docs = db.query(KnowledgePage).filter(or_(*filters)).limit(5).all()
+            
+            if docs:
+                rag_context = "Instrucción: Utiliza la siguiente información de la base de conocimiento para responder. Es OBLIGATORIO que cites el documento, la ruta y la hoja (página) de donde obtuviste la información.\n\n"
+                for d in docs:
+                    rag_context += f"--- Documento: {d.filename} | Ruta: {d.s3_key} | Hoja: {d.page_number} ---\n{d.content[:2000]}...\n\n"
+
     def generate():
         full_response = ""
         payload = {
@@ -176,6 +247,9 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         }
         if context:
             payload["context"] = context
+        
+        if rag_context:
+            payload["prompt"] = f"{rag_context}\n\nPregunta del usuario: {request.prompt}"
             
         try:
             with requests.post(f"{ollama_url}/api/generate", json=payload, stream=True) as response:
@@ -210,7 +284,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     return StreamingResponse(generate(), headers=headers, media_type="text/plain")
 
 @app.post("/analyze")
-async def analyze_document(file: UploadFile = File(...), model: str = "llama3"):
+async def analyze_document(file: UploadFile = File(...), model: str = "llama3", query: Optional[str] = None):
     # 1. Validar que sea PDF
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se permiten archivos PDF")
@@ -233,7 +307,10 @@ async def analyze_document(file: UploadFile = File(...), model: str = "llama3"):
     # 3. Enviar a la IA para buscar temas
     # Truncamos el texto para no saturar el contexto (aprox 12k caracteres para empezar)
     truncated_text = text[:12000]
-    prompt = f"Analiza el siguiente documento y lista los 5 temas principales o puntos clave que se tratan en él:\n\nTEXTO:\n{truncated_text}"
+    if query:
+        prompt = f"Basado únicamente en el siguiente texto, responde a la pregunta: '{query}'. Si la respuesta no está en el texto, indícalo.\n\nTEXTO:\n{truncated_text}"
+    else:
+        prompt = f"Analiza el siguiente documento y lista los 5 temas principales o puntos clave que se tratan en él:\n\nTEXTO:\n{truncated_text}"
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     payload = {"model": model, "prompt": prompt, "stream": False}
@@ -241,7 +318,7 @@ async def analyze_document(file: UploadFile = File(...), model: str = "llama3"):
     try:
         response = requests.post(f"{ollama_url}/api/generate", json=payload)
         if response.status_code == 200:
-            return {"topics": response.json().get("response", "")}
+            return {"result": response.json().get("response", "")}
         else:
             raise HTTPException(status_code=response.status_code, detail="Error en el motor de IA")
     except Exception as e:

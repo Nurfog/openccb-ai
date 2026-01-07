@@ -152,9 +152,8 @@ curl "http://localhost:8000/sessions/juan"
 ### 5. Analizar Documento
 **POST** `/analyze`
 ```bash
-curl -X POST "http://localhost:8000/analyze" \
-     -F "file=@documento.pdf" \
-     -F "model=llama3"
+curl -X POST "http://localhost:8000/analyze?model=llama3&query=Donde%20esta%20el%20procedimiento" \
+     -F "file=@documento.pdf"
 ```
 *Respuesta:* JSON con los temas principales extraídos del documento.
 
