@@ -88,10 +88,23 @@ def login_register_sidebar():
             
             st.divider()
             st.subheader("☁️ Base de Conocimiento (S3)")
+            
+            with st.expander("Configuración AWS"):
+                aws_key = st.text_input("AWS Access Key", type="password")
+                aws_secret = st.text_input("AWS Secret Key", type="password")
+                aws_region = st.text_input("AWS Region", value="us-east-2")
+                bucket_name = st.text_input("Bucket Name")
+
             if st.button("Sincronizar Documentos"):
                 with st.spinner("Descargando e indexando desde S3..."):
                     try:
-                        res = requests.post(f"{API_URL}/s3/sync")
+                        payload = {
+                            "aws_access_key_id": aws_key,
+                            "aws_secret_access_key": aws_secret,
+                            "aws_region": aws_region,
+                            "bucket_name": bucket_name
+                        }
+                        res = requests.post(f"{API_URL}/s3/sync", json=payload)
                         if res.status_code == 200:
                             st.success(res.json().get("message"))
                         else:
@@ -100,27 +113,127 @@ def login_register_sidebar():
                         st.error(f"Error de conexión: {e}")
             
             st.divider()
-            st.subheader("📄 Analizar Documento")
-            uploaded_file = st.file_uploader("Subir PDF para buscar temas", type="pdf")
-            doc_query = st.text_input("Pregunta sobre el documento (Opcional)", placeholder="Ej: ¿Dónde está el procedimiento de no conformidad?")
+            st.subheader("📂 Contexto del Proyecto")
+            st.caption("Aprender del código fuente y archivos locales.")
             
-            if uploaded_file is not None:
-                if st.button("Analizar Documento"):
-                    with st.spinner("Procesando documento..."):
-                        try:
-                            files = {"file": (uploaded_file.name, uploaded_file, "application/pdf")}
-                            params = {"model": st.session_state.current_model}
-                            if doc_query:
-                                params["query"] = doc_query
-                            res = requests.post(f"{API_URL}/analyze", files=files, params=params)
-                            
-                            if res.status_code == 200:
-                                st.success("Análisis completado")
-                                st.info(res.json().get("result"))
+            if st.button("Sincronizar Proyecto Local"):
+                with st.spinner("Leyendo estructura de archivos..."):
+                    try:
+                        res = requests.post(f"{API_URL}/local/sync")
+                        if res.status_code == 200:
+                            st.success(res.json().get("message"))
+                        else:
+                            st.error(f"Error: {res.text}")
+                    except Exception as e:
+                        st.error(f"Error de conexión: {e}")
+
+            st.divider()
+            st.subheader("🔍 Explorar Archivos")
+            st.caption("Selecciona archivos para incluir en el contexto del chat.")
+            
+            # Estado para archivos seleccionados
+            if "selected_dirs" not in st.session_state:
+                st.session_state.selected_dirs = []
+            if "selected_files" not in st.session_state:
+                st.session_state.selected_files = []
+            if "expand_all" not in st.session_state:
+                st.session_state.expand_all = False
+            
+            # Función para obtener todas las carpetas recursivamente
+            def get_all_dirs(current_path="/context"):
+                all_dirs = set()
+                ignore_dirs = {'__pycache__', '.git', 'uploaded_context', 'node_modules', '.vscode', '.idea', 'venv'}
+                try:
+                    res = requests.get(f"{API_URL}/files", params={"path": current_path})
+                    if res.status_code == 200:
+                        items = res.json().get("items", [])
+                        for item in items:
+                            if item["is_directory"]:
+                                if item["name"] not in ignore_dirs:
+                                    all_dirs.add(item["path"])
+                                    all_dirs.update(get_all_dirs(item["path"]))
+                except Exception as e:
+                    st.error(f"Error obteniendo carpetas: {e}")
+                return all_dirs
+            
+            # Checkbox para seleccionar todas las carpetas
+            if st.button("Seleccionar todas las carpetas"):
+                with st.spinner("Explorando todas las carpetas..."):
+                    all_dirs = get_all_dirs()
+                st.success(f"Carpetas encontradas: {len(all_dirs)}")
+                st.session_state.selected_dirs = list(set(st.session_state.selected_dirs).union(all_dirs))
+                st.info(f"Total carpetas seleccionadas: {len(st.session_state.selected_dirs)}")
+                st.session_state.expand_all = True
+                st.rerun()
+            
+            # Función para mostrar árbol de archivos
+            def display_file_tree(current_path="/context", level=0):
+                ignore_dirs = {'__pycache__', '.git', 'uploaded_context', 'node_modules', '.vscode', '.idea', 'venv'}
+                try:
+                    res = requests.get(f"{API_URL}/files", params={"path": current_path})
+                    if res.status_code == 200:
+                        items = res.json().get("items", [])
+                        for item in sorted(items, key=lambda x: (not x["is_directory"], x["name"])):
+                            if item["is_directory"] and item["name"] in ignore_dirs:
+                                continue
+                            indent = "  " * level
+                            if item["is_directory"]:
+                                dir_checked = item["path"] in st.session_state.selected_dirs
+                                with st.expander(f"{indent}📁 {item['name']}", expanded=st.session_state.expand_all):
+                                    # Checkbox para la carpeta
+                                    if st.checkbox(f"Seleccionar carpeta {item['name']}", value=dir_checked, key=f"dir_{item['path']}"):
+                                        if item["path"] not in st.session_state.selected_dirs:
+                                            st.session_state.selected_dirs.append(item["path"])
+                                    else:
+                                        if item["path"] in st.session_state.selected_dirs:
+                                            st.session_state.selected_dirs.remove(item["path"])
+                                    display_file_tree(item["path"], level + 1)
                             else:
-                                st.error(f"Error: {res.text}")
-                        except Exception as e:
-                            st.error(f"Error de conexión: {e}")
+                                checked = item["path"] in st.session_state.selected_files
+                                if st.checkbox(f"{indent}📄 {item['name']}", value=checked, key=item["path"]):
+                                    if item["path"] not in st.session_state.selected_files:
+                                        st.session_state.selected_files.append(item["path"])
+                                else:
+                                    if item["path"] in st.session_state.selected_files:
+                                        st.session_state.selected_files.remove(item["path"])
+                    else:
+                        st.error(f"Error cargando archivos: {res.text}")
+                except Exception as e:
+                    st.error(f"Error de conexión: {e}")
+            
+            display_file_tree()
+            
+            if st.session_state.selected_dirs or st.session_state.selected_files:
+                st.write(f"Carpetas seleccionadas: {len(st.session_state.selected_dirs)} | Archivos seleccionados: {len(st.session_state.selected_files)}")
+                if st.button("Limpiar Selección"):
+                    st.session_state.selected_dirs = []
+                    st.session_state.selected_files = []
+                    st.session_state.expand_all = False
+                    st.rerun()
+            else:
+                st.write("No hay archivos seleccionados.")
+
+            st.divider()
+            st.subheader("📁 Subir Archivos/Carpetas")
+            st.caption("Arrastra y suelta archivos o carpetas aquí para añadirlos al contexto.")
+            
+            uploaded_files = st.file_uploader(
+                "Subir archivos",
+                accept_multiple_files=True,
+                type=None,  # Acepta todos los tipos
+                help="Puedes seleccionar múltiples archivos o arrastrarlos aquí."
+            )
+            
+            if uploaded_files:
+                st.success(f"Archivos subidos: {len(uploaded_files)}")
+                for file in uploaded_files:
+                    # Guardar en session_state o procesar
+                    file_content = file.read().decode('utf-8', errors='ignore')
+                    # Aquí podrías añadir lógica para indexar o usar directamente
+                    st.text_area(f"Contenido de {file.name}", file_content[:500], height=100)
+            
+            # Opción para carpetas (limitado por navegador)
+            st.caption("Nota: Los navegadores modernos permiten arrastrar carpetas, pero Streamlit tiene limitaciones. Usa la exploración de archivos locales arriba para mejor control.")
             
             if st.button("Cerrar Sesión"):
                 st.session_state.token = None
@@ -153,9 +266,58 @@ def chat_interface():
             full_response = ""
             
             try:
+                # Indicadores de tarea
+                status_placeholder = st.empty()
+                status_placeholder.info("📝 Preparando contexto de archivos seleccionados...")
+                
+                # Obtener contenido de archivos seleccionados
+                context_files = ""
+                selected_files = list(st.session_state.selected_files)
+                
+                # Expandir carpetas seleccionadas a archivos
+                def expand_dir_to_files(dir_path):
+                    files = []
+                    try:
+                        res = requests.get(f"{API_URL}/files", params={"path": dir_path})
+                        if res.status_code == 200:
+                            items = res.json().get("items", [])
+                            for item in items:
+                                if item["is_directory"]:
+                                    files.extend(expand_dir_to_files(item["path"]))
+                                else:
+                                    files.append(item["path"])
+                    except Exception as e:
+                        st.error(f"Error expandiendo {dir_path}: {e}")
+                    return files
+                
+                for dir_path in st.session_state.selected_dirs:
+                    selected_files.extend(expand_dir_to_files(dir_path))
+                
+                selected_files = list(set(selected_files))  # Remover duplicados
+                
+                if len(selected_files) > 20:
+                    st.warning(f"Demasiados archivos seleccionados ({len(selected_files)}). Limitando a 20 para evitar timeouts.")
+                    selected_files = selected_files[:20]
+                
+                if selected_files:
+                    status_placeholder.info("📂 Leyendo contenido de archivos...")
+                    context_files = "Contexto de archivos seleccionados:\n"
+                    for file_path in selected_files:
+                        try:
+                            res = requests.get(f"{API_URL}/file/content", params={"path": file_path})
+                            if res.status_code == 200:
+                                content = res.json().get("content", "")
+                                context_files += f"\n--- Archivo: {file_path} ---\n{content[:2000]}...\n"  # Limitar a 2000 chars por archivo
+                            else:
+                                context_files += f"\n--- Archivo: {file_path} ---\nError cargando contenido.\n"
+                        except Exception as e:
+                            context_files += f"\n--- Archivo: {file_path} ---\nError: {str(e)}\n"
+                
+                status_placeholder.info("🤖 Enviando consulta a la IA...")
+                
                 payload = {
                     "username": st.session_state.username,
-                    "prompt": prompt,
+                    "prompt": prompt + (f"\n\n{context_files}" if context_files else ""),
                     "session_id": st.session_state.session_id,
                     "model": st.session_state.current_model,
                     "use_kb": st.session_state.use_kb
@@ -170,6 +332,8 @@ def chat_interface():
                     if new_session_id:
                         st.session_state.session_id = new_session_id
 
+                    status_placeholder.info("💭 Generando respuesta...")
+                    
                     for chunk in response.iter_content(chunk_size=1024):
                         if chunk:
                             text_chunk = chunk.decode("utf-8")
@@ -178,6 +342,10 @@ def chat_interface():
                     
                     message_placeholder.markdown(full_response)
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    
+                    status_placeholder.success("✅ Respuesta completada")
+                    status_placeholder.empty()  # Limpiar
+                    
                 else:
                     st.error(f"Error del servidor: {response.status_code} - {response.text}")
             except Exception as e:

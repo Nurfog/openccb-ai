@@ -1,13 +1,19 @@
 services:
   ollama:
     image: ollama/ollama:latest
+    restart: always
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_MAX_LOADED_MODELS=1  # Sube este número si tienes mucha RAM (ej: 2 o 3)
+      - OLLAMA_NUM_PARALLEL=2       # Usuarios simultáneos sobre el MISMO modelo
+      - OLLAMA_KEEP_ALIVE=5m        # Tiempo que el modelo se queda en memoria sin uso
 
   redis:
     image: redis:alpine
+    restart: always
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -15,6 +21,7 @@ services:
 
   db:
     image: postgres:15-alpine
+    restart: always
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
@@ -31,15 +38,12 @@ services:
       - "${API_PORT:-8000}:8000"
     volumes:
       - ./api:/app
+      - .:/context
     environment:
       - OLLAMA_URL=http://ollama:11434
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_REGION=${AWS_REGION}
-      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
     depends_on:
       - ollama
       - redis

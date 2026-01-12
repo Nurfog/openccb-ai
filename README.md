@@ -164,7 +164,14 @@ curl -X POST "http://localhost:8000/analyze?model=llama3&query=Donde%20esta%20el
 Descarga los PDFs del bucket S3 configurado, extrae el texto página por página e indexa el contenido en la base de datos para búsquedas RAG.
 
 ```bash
-curl -X POST "http://localhost:8000/s3/sync"
+curl -X POST "http://localhost:8000/s3/sync" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "aws_access_key_id": "TU_ACCESS_KEY",
+           "aws_secret_access_key": "TU_SECRET_KEY",
+           "aws_region": "us-east-2",
+           "bucket_name": "nombre-del-bucket"
+         }'
 ```
 *Respuesta:* JSON con la cantidad de páginas sincronizadas.
 

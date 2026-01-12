@@ -30,6 +30,21 @@ redis_client = redis.Redis(host=redis_host, port=redis_port, db=0)
 # Configuración de Base de Datos (PostgreSQL)
 DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
+
+# Esperar a que la base de datos esté lista
+import time
+max_retries = 30
+for i in range(max_retries):
+    try:
+        with engine.connect() as conn:
+            print("Conexión a la base de datos exitosa")
+            break
+    except Exception as e:
+        print(f"Esperando a la base de datos... intento {i+1}/{max_retries}")
+        time.sleep(2)
+else:
+    raise Exception("No se pudo conectar a la base de datos después de varios intentos")
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -93,6 +108,12 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None # Identificador opcional
     use_kb: bool = False # Usar base de conocimiento
 
+class S3SyncRequest(BaseModel):
+    aws_access_key_id: str
+    aws_secret_access_key: str
+    aws_region: str
+    bucket_name: str
+
 @app.get("/")
 def read_root():
     return {"message": "Hola, soy tu asistente de IA personal."}
@@ -135,19 +156,14 @@ def get_sessions(username: str, db: Session = Depends(get_db)):
     ]
 
 @app.post("/s3/sync")
-def sync_s3(db: Session = Depends(get_db)):
-    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    aws_region = os.getenv("AWS_REGION")
-    bucket_name = os.getenv("S3_BUCKET_NAME")
-
-    if not all([aws_access_key, aws_secret_key, bucket_name]):
-        raise HTTPException(status_code=500, detail="Faltan credenciales de AWS en variables de entorno")
-
-    s3 = boto3.client('s3', aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key, region_name=aws_region)
+def sync_s3(request: S3SyncRequest, db: Session = Depends(get_db)):
+    s3 = boto3.client('s3', 
+                      aws_access_key_id=request.aws_access_key_id, 
+                      aws_secret_access_key=request.aws_secret_access_key, 
+                      region_name=request.aws_region)
     
     try:
-        response = s3.list_objects_v2(Bucket=bucket_name)
+        response = s3.list_objects_v2(Bucket=request.bucket_name)
         if 'Contents' not in response:
             return {"message": "Bucket vacío o sin acceso"}
             
@@ -163,7 +179,8 @@ def sync_s3(db: Session = Depends(get_db)):
                 
             # Descargar y procesar
             file_obj = io.BytesIO()
-            s3.download_fileobj(bucket_name, key, file_obj)
+            s3.download_fileobj(request.bucket_name, key, file_obj)
+            file_obj.seek(0)
             pdf = PdfReader(file_obj)
             
             # Procesar página por página
@@ -178,6 +195,61 @@ def sync_s3(db: Session = Depends(get_db)):
         return {"message": f"Sincronizadas {count} páginas nuevas desde S3"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error S3: {str(e)}")
+
+@app.post("/local/sync")
+def sync_local(db: Session = Depends(get_db)):
+    base_path = "/context"
+    if not os.path.exists(base_path):
+        raise HTTPException(status_code=404, detail="Carpeta de contexto no encontrada.")
+    
+    # Extensiones de archivos de código y texto a procesar
+    allowed_extensions = {'.py', '.md', '.txt', '.yml', '.yaml', '.sh', '.json', '.sql', '.js', '.html', '.css', '.env.example', '.dockerfile'}
+    # Directorios a ignorar para no ensuciar el contexto
+    ignore_dirs = {'.git', '__pycache__', 'postgres_data', 'redis_data', 'ollama_data', 'venv', 'node_modules', '.idea', '.vscode'}
+    
+    count = 0
+    files_processed = 0
+    
+    for root, dirs, files in os.walk(base_path):
+        # Modificar dirs in-place para saltar directorios ignorados
+        dirs[:] = [d for d in dirs if d not in ignore_dirs]
+        
+        for file in files:
+            ext = os.path.splitext(file)[1].lower()
+            if ext in allowed_extensions or file.lower() in ['dockerfile', 'makefile', 'requirements.txt']:
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, base_path)
+                key = f"local/{rel_path}"
+                
+                # Verificar si ya existe (evitar duplicados)
+                # if db.query(KnowledgePage).filter(KnowledgePage.s3_key == key).first():
+                #     continue
+                
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read().replace('\x00', '')
+                        if content.strip():
+                            # Guardamos el archivo completo como página 1
+                            doc = KnowledgePage(filename=rel_path, s3_key=key, page_number=1, content=content)
+                            db.add(doc)
+                            count += 1
+                            files_processed += 1
+                except Exception as e:
+                    print(f"Error leyendo {file_path}: {e}")
+    db.commit()
+    return {"message": f"Contexto del proyecto sincronizado. {files_processed} archivos de código/texto indexados."}
+
+@app.get("/documents")
+def list_documents(db: Session = Depends(get_db)):
+    docs = db.query(KnowledgePage.filename).distinct().all()
+    return [doc[0] for doc in docs]
+
+@app.get("/documents/{filename}")
+def view_document(filename: str, db: Session = Depends(get_db)):
+    pages = db.query(KnowledgePage).filter(KnowledgePage.filename == filename).order_by(KnowledgePage.page_number).all()
+    if not pages:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    return [{"page": p.page_number, "content": p.content} for p in pages]
 
 @app.post("/chat")
 def chat(request: ChatRequest, db: Session = Depends(get_db)):
@@ -214,7 +286,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
             print(f"Error generando título: {e}")
 
     # Guardar mensaje del usuario en DB
-    user_msg = ChatMessage(session_id=session_id, role="user", content=request.prompt)
+    user_msg = ChatMessage(session_id=session_id, role="user", content=request.prompt.replace('\x00', ''))
     db.add(user_msg)
     db.commit()
 
@@ -276,7 +348,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         # Guardar respuesta del asistente en DB al finalizar el stream
         # Usamos una nueva sesión de DB porque estamos dentro de un generador
         with SessionLocal() as db_inner:
-            ai_msg = ChatMessage(session_id=session_id, role="assistant", content=full_response)
+            ai_msg = ChatMessage(session_id=session_id, role="assistant", content=full_response.replace('\x00', ''))
             db_inner.add(ai_msg)
             db_inner.commit()
 
@@ -296,7 +368,7 @@ async def analyze_document(file: UploadFile = File(...), model: str = "llama3", 
         text = ""
         # Extraemos texto de todas las páginas
         for page in pdf.pages:
-            text += page.extract_text() or ""
+            text += (page.extract_text() or "").replace('\x00', '')
             
         if not text.strip():
              raise HTTPException(status_code=400, detail="No se pudo extraer texto del PDF (puede ser una imagen)")
@@ -323,3 +395,41 @@ async def analyze_document(file: UploadFile = File(...), model: str = "llama3", 
             raise HTTPException(status_code=response.status_code, detail="Error en el motor de IA")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error de conexión con IA: {str(e)}")
+
+@app.get("/files")
+def list_files(path: str = "/context"):
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+    
+    if not os.path.isdir(path):
+        raise HTTPException(status_code=400, detail="La ruta no es un directorio")
+    
+    try:
+        items = []
+        for item in os.listdir(path):
+            item_path = os.path.join(path, item)
+            is_dir = os.path.isdir(item_path)
+            items.append({
+                "name": item,
+                "path": item_path,
+                "is_directory": is_dir,
+                "size": os.path.getsize(item_path) if not is_dir else 0
+            })
+        return {"items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listando archivos: {str(e)}")
+
+@app.get("/file/content")
+def get_file_content(path: str):
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=400, detail="La ruta no es un archivo")
+    
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read(10000)  # Limitar a 10k chars para evitar timeouts
+        return {"content": content, "path": path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error leyendo archivo: {str(e)}")
