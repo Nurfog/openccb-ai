@@ -5,6 +5,7 @@ import os
 import json
 import requests
 import redis
+import shutil
 import uuid
 import io
 import boto3
@@ -113,6 +114,13 @@ class S3SyncRequest(BaseModel):
     aws_secret_access_key: str
     aws_region: str
     bucket_name: str
+
+class FileWriteRequest(BaseModel):
+    path: str
+    content: str
+
+class FileMkdirRequest(BaseModel):
+    path: str
 
 @app.get("/")
 def read_root():
@@ -435,3 +443,54 @@ def get_file_content(path: str):
         return {"content": content, "path": path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error leyendo archivo: {str(e)}")
+
+@app.post("/file/write")
+def write_file(request: FileWriteRequest):
+    base_path = "/context"
+    # Sanitizar ruta para evitar directory traversal (seguridad)
+    safe_path = os.path.normpath(os.path.join(base_path, request.path.lstrip("/")))
+    if not safe_path.startswith(base_path):
+        raise HTTPException(status_code=403, detail="Acceso denegado: Ruta fuera del contexto del proyecto")
+    
+    try:
+        # Crear directorios padres si no existen
+        os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+        
+        with open(safe_path, 'w', encoding='utf-8') as f:
+            f.write(request.content)
+            
+        return {"message": f"Archivo guardado exitosamente: {request.path}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error escribiendo archivo: {str(e)}")
+
+@app.delete("/file/delete")
+def delete_file(path: str):
+    base_path = "/context"
+    safe_path = os.path.normpath(os.path.join(base_path, path.lstrip("/")))
+    if not safe_path.startswith(base_path):
+        raise HTTPException(status_code=403, detail="Acceso denegado: Ruta fuera del contexto del proyecto")
+    
+    if not os.path.exists(safe_path):
+        raise HTTPException(status_code=404, detail="Archivo o directorio no encontrado")
+        
+    try:
+        if os.path.isdir(safe_path):
+            shutil.rmtree(safe_path)
+        else:
+            os.remove(safe_path)
+        return {"message": f"Eliminado exitosamente: {path}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error eliminando: {str(e)}")
+
+@app.post("/file/mkdir")
+def create_directory(request: FileMkdirRequest):
+    base_path = "/context"
+    safe_path = os.path.normpath(os.path.join(base_path, request.path.lstrip("/")))
+    if not safe_path.startswith(base_path):
+        raise HTTPException(status_code=403, detail="Acceso denegado: Ruta fuera del contexto del proyecto")
+        
+    try:
+        os.makedirs(safe_path, exist_ok=True)
+        return {"message": f"Directorio creado: {request.path}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creando directorio: {str(e)}")

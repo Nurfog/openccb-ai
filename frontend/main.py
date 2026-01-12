@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import json
 import os
+import time
 
 # Configuración
 API_URL = os.getenv("API_URL", "http://api:8000")
@@ -351,11 +352,155 @@ def chat_interface():
             except Exception as e:
                 st.error(f"Error de conexión: {e}")
 
+def get_all_files_flat(current_path="/context"):
+    files = []
+    try:
+        res = requests.get(f"{API_URL}/files", params={"path": current_path})
+        if res.status_code == 200:
+            items = res.json().get("items", [])
+            for item in items:
+                if item["is_directory"]:
+                    if item["name"] not in {'.git', '__pycache__', 'node_modules', 'venv', '.idea', '.vscode'}:
+                        files.extend(get_all_files_flat(item["path"]))
+                else:
+                    files.append(item["path"])
+    except:
+        pass
+    return files
+
+def editor_interface():
+    st.header("📝 Editor de Archivos")
+    
+    col1, col2, col3 = st.columns([1, 3, 2])
+    
+    with col1:
+        st.subheader("Explorador")
+        if st.button("🔄 Recargar"):
+            st.rerun()
+            
+        all_files = get_all_files_flat()
+        # Mapeo para mostrar rutas relativas limpias
+        display_map = {f.replace("/context/", ""): f for f in all_files}
+        display_keys = sorted(list(display_map.keys()))
+        
+        selected_key = st.radio("Archivos", display_keys, label_visibility="collapsed") if display_keys else None
+        
+        st.divider()
+        st.caption("Crear Nuevo")
+        new_name = st.text_input("Nombre (ej: src/test.py)")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("📄 Archivo"):
+                if new_name:
+                    requests.post(f"{API_URL}/file/write", json={"path": new_name, "content": ""})
+                    st.rerun()
+        with c2:
+            if st.button("📁 Carpeta"):
+                if new_name:
+                    requests.post(f"{API_URL}/file/mkdir", json={"path": new_name})
+                    st.rerun()
+    
+    current_content = ""
+
+    with col2:
+        if selected_key:
+            full_path = display_map[selected_key]
+            st.subheader(f"Editando: {selected_key}")
+            
+            # Cargar contenido solo si cambia el archivo seleccionado
+            if "editor_file" not in st.session_state or st.session_state.editor_file != full_path:
+                res = requests.get(f"{API_URL}/file/content", params={"path": full_path})
+                if res.status_code == 200:
+                    st.session_state.editor_content = res.json().get("content", "")
+                    st.session_state.editor_file = full_path
+                    # Resetear el widget de texto para que tome el nuevo valor
+                    if "code_editor" in st.session_state:
+                        del st.session_state.code_editor
+                else:
+                    st.session_state.editor_content = ""
+            
+            new_content = st.text_area("Contenido", value=st.session_state.editor_content, height=600, key="code_editor")
+            current_content = new_content
+            
+            b1, b2 = st.columns([1, 5])
+            with b1:
+                if st.button("💾 Guardar", type="primary"):
+                    res = requests.post(f"{API_URL}/file/write", json={"path": selected_key, "content": new_content})
+                    if res.status_code == 200:
+                        st.success("Guardado!")
+                        st.session_state.editor_content = new_content
+                    else:
+                        st.error(res.text)
+            with b2:
+                if st.button("🗑️ Eliminar"):
+                    requests.delete(f"{API_URL}/file/delete", params={"path": selected_key})
+                    if "editor_file" in st.session_state: del st.session_state.editor_file
+                    st.rerun()
+        else:
+            st.info("Selecciona un archivo para editar.")
+
+    with col3:
+        if selected_key:
+            st.subheader("🤖 Copilot")
+            
+            # Historial de chat del editor
+            if "editor_messages" not in st.session_state:
+                st.session_state.editor_messages = []
+            
+            # Contenedor con scroll para el chat
+            chat_container = st.container(height=600)
+            with chat_container:
+                for msg in st.session_state.editor_messages:
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+            
+            # Input de chat
+            if prompt := st.chat_input("Pregunta sobre tu código...", key="editor_chat_input"):
+                st.session_state.editor_messages.append({"role": "user", "content": prompt})
+                with chat_container:
+                    with st.chat_message("user"):
+                        st.markdown(prompt)
+                    
+                    with st.chat_message("assistant"):
+                        msg_placeholder = st.empty()
+                        full_response = ""
+                        
+                        # Construir contexto con el código actual
+                        context_prompt = f"Actúa como un asistente de programación (Copilot). El usuario está editando el archivo: '{selected_key}'.\n"
+                        context_prompt += f"Contenido del código:\n```\n{current_content}\n```\n\n"
+                        context_prompt += f"Pregunta del usuario: {prompt}"
+                        
+                        payload = {
+                            "username": st.session_state.username,
+                            "prompt": context_prompt,
+                            "session_id": st.session_state.session_id,
+                            "model": st.session_state.current_model,
+                            "use_kb": False
+                        }
+                        
+                        try:
+                            response = requests.post(f"{API_URL}/chat", json=payload, stream=True)
+                            if response.status_code == 200:
+                                for chunk in response.iter_content(chunk_size=1024):
+                                    if chunk:
+                                        full_response += chunk.decode("utf-8")
+                                        msg_placeholder.markdown(full_response + "▌")
+                                msg_placeholder.markdown(full_response)
+                                st.session_state.editor_messages.append({"role": "assistant", "content": full_response})
+                            else:
+                                st.error(f"Error: {response.text}")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
 def main():
     login_register_sidebar()
     
     if st.session_state.username:
-        chat_interface()
+        tab1, tab2 = st.tabs(["💬 Chat con IA", "📝 Editor de Código"])
+        with tab1:
+            chat_interface()
+        with tab2:
+            editor_interface()
     else:
         st.info("👈 Por favor, inicia sesión o regístrate en el menú lateral para comenzar.")
 

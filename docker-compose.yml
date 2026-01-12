@@ -38,7 +38,7 @@ services:
       - "${API_PORT:-8000}:8000"
     volumes:
       - ./api:/app
-      - .:/context
+      - ${PROJECT_ROOT:-.}:/context # Define PROJECT_ROOT en .env para apuntar a tu proyecto
     environment:
       - OLLAMA_URL=http://ollama:11434
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}

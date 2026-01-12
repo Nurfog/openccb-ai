@@ -65,6 +65,19 @@ Si quieres ejecutarlo en tu máquina para programar:
 
 ---
 
+## 📂 Configuración de Carpeta de Trabajo
+
+Por defecto, la IA ve los archivos de este repositorio. Para que trabaje sobre **tus propios proyectos**:
+
+1.  Edita el archivo `.env`:
+    ```ini
+    PROJECT_ROOT=/ruta/a/tu/proyecto
+    # Ejemplo Windows/WSL: PROJECT_ROOT=/mnt/c/Users/Juan/MisDocumentos/ProyectoWeb
+    ```
+2.  Reinicia: `docker compose up -d`
+
+---
+
 ## 🚢 Guías de Despliegue (Deploy)
 
 Este proyecto soporta dos métodos de despliegue remoto sin necesidad de instalar Git en el servidor de destino.
