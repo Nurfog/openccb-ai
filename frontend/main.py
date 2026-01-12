@@ -81,7 +81,7 @@ def login_register_sidebar():
             # Selector de modelo
             st.session_state.current_model = st.selectbox(
                 "Modelo de IA",
-                ["llama3", "mistral", "gemma2", "codellama", "phi3", "tinyllama"],
+                ["gpt-oss:20b", "llama3", "mistral", "gemma2", "codellama", "phi3", "tinyllama"],
                 index=0,
                 help="Selecciona el modelo según tu tarea. Si falla, asegúrate de descargarlo."
             )

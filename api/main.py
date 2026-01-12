@@ -104,7 +104,7 @@ class User(BaseModel):
 class ChatRequest(BaseModel):
     username: str
     prompt: str
-    model: str = "llama3"  # Asegúrate de tener este modelo descargado en Ollama
+    model: str = "gpt-oss:20b"  # Asegúrate de tener este modelo descargado en Ollama
     session_id: Optional[str] = None # Identificador opcional
     use_kb: bool = False # Usar base de conocimiento
 
@@ -340,6 +340,8 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
                 yield f"Error: El modelo '{request.model}' no está instalado en Ollama. Ejecuta: docker compose exec ollama ollama pull {request.model}"
+            elif e.response.status_code == 500:
+                yield f"Error Interno (500): El servidor de IA se quedó sin memoria al intentar cargar '{request.model}'. Revisa los logs del contenedor 'ollama' con 'docker compose logs ollama' para más detalles."
             else:
                 yield f"Error de IA ({e.response.status_code}): {e.response.text}"
         except Exception as e:
@@ -356,7 +358,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     return StreamingResponse(generate(), headers=headers, media_type="text/plain")
 
 @app.post("/analyze")
-async def analyze_document(file: UploadFile = File(...), model: str = "llama3", query: Optional[str] = None):
+async def analyze_document(file: UploadFile = File(...), model: str = "gpt-oss:20b", query: Optional[str] = None):
     # 1. Validar que sea PDF
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se permiten archivos PDF")
